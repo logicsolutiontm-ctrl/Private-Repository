@@ -2,7 +2,7 @@ import os
 import sqlite3
 import feedparser
 import requests
-import google.generativeai as genai
+from google import genai
 
 # ==========================================
 # 1. إعداد المفاتيح (من GitHub Secrets)
@@ -11,33 +11,23 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
-# إعداد نموذج الذكاء الاصطناعي
-genai.configure(api_key=GEMINI_API_KEY)
-model = genai.GenerativeModel("gemini-1.5-flash")
+# إعداد عميل الذكاء الاصطناعي بالمكتبة الجديدة
+client = genai.Client(api_key=GEMINI_API_KEY)
 
 # ==========================================
 # 2. مصادر الأخبار (RSS Feeds)
 # ==========================================
 FEEDS = [
-    # المصادر التونسية والإقليمية الأساسية
     "https://www.aljazeera.net/feed",
     "https://www.mosaiquefm.net/ar/rss",
     "https://tunisie-telegraph.com/feed/",
-    
-    # المصادر الدولية (باللغة العربية)
     "https://feeds.bbci.co.uk/arabic/rss.xml",
     "https://www.france24.com/ar/rss",
-    
-    # روابط فايسبوك (يجب توليدها عبر rss.app أو PolitePol ووضعها هنا بدون علامة #)
-    "https://rss.app/feeds/W2OMYUYXCqcjYJvd.xml", # رئاسة الجمهورية
-    "https://rss.app/feeds/lbexmB0XV0eGELWZ.xml", # رئاسة الحكومة
-    "https://rss.app/feeds/jaBascGUQX6aVLXX.xml", # وزارة الداخلية التونسية
-    "https://rss.app/feeds/VfqCKAQoksCYKJXT.xml", # الدبلوماسية التونسية
-    "https://rss.app/feeds/wzByjGCBuLJ4k5CL.xml", # وزارة العدل
+    # "https://rss.app/feeds/v1.1/YOUR_LINK_HERE", # روابط فايسبوك
 ]
 
 # ==========================================
-# 3. إدارة قاعدة البيانات (لمنع التكرار)
+# 3. إدارة قاعدة البيانات
 # ==========================================
 def init_db():
     conn = sqlite3.connect("sent_news.db")
@@ -77,7 +67,11 @@ def evaluate_and_summarize(title, summary):
     3. إذا كان مهماً ويخص تونس، اكتب ملخصاً سريعاً ومكثفاً في نقطتين أو ثلاث أسطر كحد أقصى بأسلوب احترافي ومباشر.
     """
     try:
-        response = model.generate_content(prompt)
+        # استخدام الطريقة الجديدة لتوليد النصوص
+        response = client.models.generate_content(
+            model='gemini-1.5-flash',
+            contents=prompt,
+        )
         text = response.text.strip()
         if "IGNORE" in text.upper():
             return None
@@ -104,21 +98,19 @@ def send_telegram(text, link):
         print(f"Error sending to Telegram: {e}")
 
 # ==========================================
-# 6. التشغيل الرئيسي (المحرك)
+# 6. التشغيل الرئيسي
 # ==========================================
 def main():
     init_db()
     print("بدأ البحث عن الأخبار في المصادر المحددة...")
     
     for feed_url in FEEDS:
-        # تجاوز الروابط المعطلة (التي تبدأ بـ #)
         if feed_url.strip().startswith("#"):
             continue
             
         print(f"\nجاري فحص المصدر: {feed_url}")
         feed = feedparser.parse(feed_url)
         
-        # فحص آخر 5 أخبار من كل مصدر لتجنب استهلاك موارد API
         for entry in feed.entries[:5]:  
             entry_id = entry.get("id", entry.get("link"))
             
@@ -136,7 +128,6 @@ def main():
                 else:
                     print("-> تم التجاهل (غير مهم أو لا يخص تونس).")
                 
-                # حفظ الخبر في قاعدة البيانات لعدم تكرار فحصه
                 mark_as_sent(entry_id)
                 
     print("\nانتهت العملية بنجاح.")
