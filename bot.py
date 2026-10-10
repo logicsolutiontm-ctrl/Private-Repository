@@ -29,11 +29,11 @@ FEEDS = [
     "https://www.france24.com/ar/rss",
     
     # روابط فايسبوك (يجب توليدها عبر rss.app أو PolitePol ووضعها هنا بدون علامة #)
-    # "https://rss.app/feeds/v1.1/YOUR_LINK_HERE", # رئاسة الجمهورية
-    # "https://rss.app/feeds/v1.1/YOUR_LINK_HERE", # رئاسة الحكومة
-    # "https://rss.app/feeds/v1.1/YOUR_LINK_HERE", # وزارة الداخلية التونسية
-    # "https://rss.app/feeds/v1.1/YOUR_LINK_HERE", # الدبلوماسية التونسية
-    # "https://rss.app/feeds/v1.1/YOUR_LINK_HERE", # وزارة العدل
+    "https://rss.app/feeds/W2OMYUYXCqcjYJvd.xml", # رئاسة الجمهورية
+    "https://rss.app/feeds/lbexmB0XV0eGELWZ.xml", # رئاسة الحكومة
+    "https://rss.app/feeds/jaBascGUQX6aVLXX.xml", # وزارة الداخلية التونسية
+    "https://rss.app/feeds/VfqCKAQoksCYKJXT.xml", # الدبلوماسية التونسية
+    "https://rss.app/feeds/wzByjGCBuLJ4k5CL.xml", # وزارة العدل
 ]
 
 # ==========================================
