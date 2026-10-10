@@ -2,7 +2,6 @@ import os
 import sqlite3
 import feedparser
 import requests
-from google import genai
 
 # ==========================================
 # 1. إعداد المفاتيح (من GitHub Secrets)
@@ -10,9 +9,6 @@ from google import genai
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
-
-# إعداد عميل الذكاء الاصطناعي بالمكتبة الجديدة
-client = genai.Client(api_key=GEMINI_API_KEY)
 
 # ==========================================
 # 2. مصادر الأخبار (RSS Feeds)
@@ -52,7 +48,7 @@ def mark_as_sent(article_id):
     conn.close()
 
 # ==========================================
-# 4. التقييم والتلخيص بالذكاء الاصطناعي
+# 4. التقييم والتلخيص بالذكاء الاصطناعي (مباشر عبر API)
 # ==========================================
 def evaluate_and_summarize(title, summary):
     prompt = f"""
@@ -66,18 +62,28 @@ def evaluate_and_summarize(title, summary):
     2. إذا لم يكن مهماً أو لا يخص تونس إطلاقاً، أجب بكلمة واحدة فقط: IGNORE
     3. إذا كان مهماً ويخص تونس، اكتب ملخصاً سريعاً ومكثفاً في نقطتين أو ثلاث أسطر كحد أقصى بأسلوب احترافي ومباشر.
     """
+    
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
+    headers = {'Content-Type': 'application/json'}
+    payload = {
+        "contents": [{"parts": [{"text": prompt}]}]
+    }
+    
     try:
-        # استخدام الطريقة الجديدة لتوليد النصوص
-        response = client.models.generate_content(
-            model='gemini-1.5-flash',
-            contents=prompt,
-        )
-        text = response.text.strip()
-        if "IGNORE" in text.upper():
+        response = requests.post(url, headers=headers, json=payload)
+        data = response.json()
+        
+        # استخراج النص من الاستجابة
+        if "candidates" in data:
+            text = data["candidates"][0]["content"]["parts"][0]["text"].strip()
+            if "IGNORE" in text.upper():
+                return None
+            return text
+        else:
+            print(f"API Error: {data}")
             return None
-        return text
     except Exception as e:
-        print(f"Error calling AI: {e}")
+        print(f"Error calling AI API: {e}")
         return None
 
 # ==========================================
