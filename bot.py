@@ -4,14 +4,14 @@ import feedparser
 import requests
 
 # ==========================================
-# 1. إعداد المفاتيح (من GitHub Secrets)
+# 1. إعداد المفاتيح
 # ==========================================
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
 # ==========================================
-# 2. مصادر الأخبار (RSS Feeds)
+# 2. مصادر الأخبار
 # ==========================================
 FEEDS = [
     "https://www.aljazeera.net/feed",
@@ -48,7 +48,7 @@ def mark_as_sent(article_id):
     conn.close()
 
 # ==========================================
-# 4. التقييم والتلخيص بالذكاء الاصطناعي (مباشر عبر API)
+# 4. التقييم والتلخيص بالذكاء الاصطناعي
 # ==========================================
 def evaluate_and_summarize(title, summary):
     prompt = f"""
@@ -63,8 +63,9 @@ def evaluate_and_summarize(title, summary):
     3. إذا كان مهماً ويخص تونس، اكتب ملخصاً سريعاً ومكثفاً في نقطتين أو ثلاث أسطر كحد أقصى بأسلوب احترافي ومباشر.
     """
     
-url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key={GEMINI_API_KEY}"
-headers = {'Content-Type': 'application/json'}
+    # تم تحديث النموذج إلى gemini-pro لضمان عمله على جميع الحسابات
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key={GEMINI_API_KEY}"
+    headers = {'Content-Type': 'application/json'}
     payload = {
         "contents": [{"parts": [{"text": prompt}]}]
     }
@@ -73,7 +74,6 @@ headers = {'Content-Type': 'application/json'}
         response = requests.post(url, headers=headers, json=payload)
         data = response.json()
         
-        # استخراج النص من الاستجابة
         if "candidates" in data:
             text = data["candidates"][0]["content"]["parts"][0]["text"].strip()
             if "IGNORE" in text.upper():
