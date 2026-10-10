@@ -89,6 +89,9 @@ def evaluate_and_summarize(title, summary):
 # ==========================================
 # 5. الإرسال إلى تيليجرام
 # ==========================================
+# ==========================================
+# 5. الإرسال إلى تيليجرام (محدثة لكشف الأخطاء)
+# ==========================================
 def send_telegram(text, link):
     message = f"🚨 **خبر جديد** 🚨\n\n{text}\n\n🔗 رابط المصدر: {link}"
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
@@ -99,9 +102,54 @@ def send_telegram(text, link):
         "disable_web_page_preview": False
     }
     try:
-        requests.post(url, json=payload)
+        response = requests.post(url, json=payload)
+        if response.status_code == 200:
+            print("-> تم إرسال الرسالة للتيليجرام بنجاح!")
+        else:
+            print(f"-> خطأ من تيليجرام: {response.json()}") # هذا السطر سيكشف لنا المشكلة
     except Exception as e:
         print(f"Error sending to Telegram: {e}")
+
+# ==========================================
+# 6. التشغيل الرئيسي (محدث للاختبار)
+# ==========================================
+def main():
+    # إرسال رسالة اختبار فورية قبل قراءة الأخبار
+    print("جاري إرسال رسالة اختبار لتيليجرام...")
+    send_telegram("هذه رسالة اختبار من البوت للتأكد من أن الربط يعمل بنجاح ✅", "https://github.com")
+
+    init_db()
+    print("بدأ البحث عن الأخبار في المصادر المحددة...")
+    
+    for feed_url in FEEDS:
+        if feed_url.strip().startswith("#"):
+            continue
+            
+        print(f"\nجاري فحص المصدر: {feed_url}")
+        feed = feedparser.parse(feed_url)
+        
+        for entry in feed.entries[:5]:  
+            entry_id = entry.get("id", entry.get("link"))
+            
+            if not is_already_sent(entry_id):
+                title = entry.get("title", "")
+                summary = entry.get("summary", "")
+                link = entry.get("link", "")
+
+                print(f"تحليل الخبر: {title}")
+                ai_summary = evaluate_and_summarize(title, summary)
+                
+                if ai_summary:
+                    send_telegram(ai_summary, link)
+                else:
+                    print("-> تم التجاهل (غير مهم أو لا يخص تونس).")
+                
+                mark_as_sent(entry_id)
+                
+    print("\nانتهت العملية بنجاح.")
+
+if __name__ == "__main__":
+    main()
 
 # ==========================================
 # 6. التشغيل الرئيسي
