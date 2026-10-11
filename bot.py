@@ -25,15 +25,18 @@ FEEDS = [
 # ==========================================
 # 3. إدارة قاعدة البيانات
 # ==========================================
+# ==========================================
+# 3. إدارة قاعدة البيانات
+# ==========================================
 def init_db():
-    conn = sqlite3.connect("sent_news.db")
+    conn = sqlite3.connect("news_v2.db") # تم تغيير الاسم هنا
     cursor = conn.cursor()
     cursor.execute("CREATE TABLE IF NOT EXISTS articles (id TEXT PRIMARY KEY)")
     conn.commit()
     conn.close()
 
 def is_already_sent(article_id):
-    conn = sqlite3.connect("sent_news.db")
+    conn = sqlite3.connect("news_v2.db") # تم تغيير الاسم هنا
     cursor = conn.cursor()
     cursor.execute("SELECT id FROM articles WHERE id = ?", (article_id,))
     data = cursor.fetchone()
@@ -41,7 +44,7 @@ def is_already_sent(article_id):
     return data is not None
 
 def mark_as_sent(article_id):
-    conn = sqlite3.connect("sent_news.db")
+    conn = sqlite3.connect("news_v2.db") # تم تغيير الاسم هنا
     cursor = conn.cursor()
     cursor.execute("INSERT OR IGNORE INTO articles (id) VALUES (?)", (article_id,))
     conn.commit()
