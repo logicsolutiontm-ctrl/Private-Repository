@@ -10,11 +10,12 @@ import requests
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
+FRIEND_CHAT_ID = os.getenv("FRIEND_CHAT_ID") # تمت إضافة معرف الصديق هنا
 
 MODELS = [
-    os.getenv("GEMINI_MODEL", "gemini-3.6-flash"),
-    "gemini-3.5-flash-lite",
-    "gemini-flash-latest",
+    os.getenv("GEMINI_MODEL", "gemini-1.5-flash"), # تم تصحيح اسم النموذج الافتراضي
+    "gemini-1.5-flash-8b",
+    "gemini-1.5-flash-latest",
 ]
 
 HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; NewsBot/1.0)"}
@@ -55,7 +56,6 @@ def mark_as_sent(article_id):
 
 # ==========================================
 # 4. التقييم والتلخيص بالذكاء الاصطناعي
-# يرجع: ("ok", نص) أو ("skip", None) أو ("error", None)
 # ==========================================
 def evaluate_and_summarize(title, summary):
     prompt = f"""
@@ -86,7 +86,7 @@ def evaluate_and_summarize(title, summary):
                     continue
                 if response.status_code == 404:
                     print(f"      [النموذج غير متاح]: {model}")
-                    break  # جرّب النموذج التالي
+                    break  
                 response.raise_for_status()
 
                 data = response.json()
@@ -105,25 +105,32 @@ def evaluate_and_summarize(title, summary):
     return "error", None
 
 # ==========================================
-# 5. الإرسال إلى تيليجرام
+# 5. الإرسال إلى تيليجرام (محدث لإرسال لأكثر من شخص)
 # ==========================================
 def send_telegram(text, link):
     message = f"🚨 خبر جديد 🚨\n\n{text}\n\n🔗 رابط المصدر: {link}"
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-    payload = {
-        "chat_id": TELEGRAM_CHAT_ID,
-        "text": message[:4000],
-        "disable_web_page_preview": False,
-    }
-    try:
-        response = requests.post(url, json=payload, timeout=30)
-        if response.status_code != 200:
-            print(f"      [خطأ تيليجرام]: {response.text}")
-            return False
-        return True
-    except Exception as e:
-        print(f"Error sending to Telegram: {e}")
-        return False
+    
+    # جمع المعرفات المتاحة (معرفك + معرف صديقك إن وجد)
+    chat_ids = [id.strip() for id in [TELEGRAM_CHAT_ID, FRIEND_CHAT_ID] if id]
+    success = False
+
+    for chat_id in chat_ids:
+        payload = {
+            "chat_id": chat_id,
+            "text": message[:4000],
+            "disable_web_page_preview": False,
+        }
+        try:
+            response = requests.post(url, json=payload, timeout=30)
+            if response.status_code == 200:
+                success = True
+            else:
+                print(f"      [خطأ تيليجرام للمعرف {chat_id}]: {response.text}")
+        except Exception as e:
+            print(f"Error sending to Telegram chat {chat_id}: {e}")
+            
+    return success
 
 # ==========================================
 # 6. التشغيل الرئيسي
@@ -161,7 +168,7 @@ def main():
                 link = entry.get("link", "")
 
                 status, ai_summary = evaluate_and_summarize(title, summary)
-                time.sleep(5)  # تجنب حدود الاستخدام المجاني
+                time.sleep(5) 
 
                 if status == "ok":
                     if send_telegram(ai_summary, link):
