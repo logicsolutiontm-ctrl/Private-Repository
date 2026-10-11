@@ -1,8 +1,15 @@
 import os
+import sys
 import time
 import sqlite3
 import feedparser
 import requests
+
+# طباعة فورية في سجلات GitHub Actions (بدون تأخير بسبب buffering)
+try:
+    sys.stdout.reconfigure(line_buffering=True)
+except Exception:
+    pass
 
 # ==========================================
 # 1. إعداد المفاتيح
