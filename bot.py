@@ -19,7 +19,7 @@ FEEDS = [
     "https://tunisie-telegraph.com/feed/",
     "https://feeds.bbci.co.uk/arabic/rss.xml",
     "https://www.france24.com/ar/rss",
-    "https://rss.app/feeds/jaBascGUQX6aVLXX.xml" # مصدر فايسبوك الذي اختبرته
+    "https://rss.app/feeds/jaBascGUQX6aVLXX.xml",
 ]
 
 # ==========================================
@@ -52,15 +52,14 @@ def mark_as_sent(article_id):
 # ==========================================
 def evaluate_and_summarize(title, summary):
     prompt = f"""
-    أنت محرر صحفي تونسي محترف.
-    اقرأ هذا الخبر:
+    أنت محرر صحفي في وكالة أنباء تونسية.
+    الخبر:
     العنوان: {title}
     التفاصيل: {summary}
 
-    المطلوب منك أمران فقط:
-    1. هل هذا الخبر يخص الشأن التونسي (حكومة، وزارات، اتحاد الشغل، بلديات، قضاء، مجتمع، أو أي شأن محلي تونسي)؟
-    - إذا كان الجواب لا (خبر دولي أو أجنبي بحت): اكتب كلمة واحدة فقط وهي SKIP.
-    - إذا كان الجواب نعم (يخص تونس): اكتب ملخصاً إخبارياً جاهزاً للنشر في سطرين. لا تكتب أي مقدمات، وإياك أن تكتب كلمة SKIP ضمن الملخص.
+    المطلوب:
+    - إذا كان الخبر لا يتعلق بتونس إطلاقاً (أخبار دولية بحتة عن أمريكا، روسيا، السعودية، إيران، إلخ): أجب بكلمة واحدة فقط: تجاهل
+    - إذا كان الخبر يخص تونس أو الشأن التونسي الداخلي: اكتب ملخصاً إخبارياً واضحاً في سطرين. إياك أن تكتب كلمة تجاهل في الملخص.
     """
     
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key={GEMINI_API_KEY}"
@@ -75,13 +74,16 @@ def evaluate_and_summarize(title, summary):
         
         if "candidates" in data:
             text = data["candidates"][0]["content"]["parts"][0]["text"].strip()
+            print(f"      [رد الذكاء الاصطناعي]: {text[:60]}...")
             
-            # الفلترة الصارمة: إذا كانت الكلمة الوحيدة هي SKIP يتم تجاهل الخبر
-            if text.upper().replace(".", "").strip() == "SKIP":
+            # فحص الرد العربي
+            cleaned = text.replace(".", "").strip()
+            if cleaned == "تجاهل" or (cleaned.startswith("تجاهل") and len(cleaned) <= 10):
                 return None
                 
             return text
         else:
+            print(f"      [خطأ في الاستجابة]: {data}")
             return None
     except Exception as e:
         print(f"Error calling AI API: {e}")
@@ -100,9 +102,11 @@ def send_telegram(text, link):
         "disable_web_page_preview": False
     }
     try:
-        requests.post(url, json=payload)
+        response = requests.post(url, json=payload)
+        if response.status_code != 200:
+            print(f"      [خطأ تيليجرام]: {response.json()}")
     except Exception as e:
-        pass
+        print(f"Error sending to Telegram: {e}")
 
 # ==========================================
 # 6. التشغيل الرئيسي
@@ -124,9 +128,8 @@ def main():
                 entry_id = entry.get("id", entry.get("link"))
                 title = entry.get("title", "")
                 
-                # التحقق مما إذا كان الخبر قد أرسل من قبل
                 if is_already_sent(entry_id):
-                    print(f"[-] تم تخطي (خبر قديم): {title}")
+                    print(f"[-] تم تخطي (خبر قديم): {title[:50]}...")
                     continue
 
                 print(f"[+] تحليل خبر جديد: {title}")
@@ -141,7 +144,6 @@ def main():
                 else:
                     print("   -> 🔴 تم التجاهل من الذكاء الاصطناعي (لا يخص تونس).")
                 
-                # حفظ الخبر في الذاكرة لكي لا يتكرر
                 mark_as_sent(entry_id)
                 
         except Exception as e:
