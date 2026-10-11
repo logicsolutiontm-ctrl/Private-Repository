@@ -1,16 +1,22 @@
-name: Telegram News Agent
+name: News Bot
 
 on:
   schedule:
-    - cron: '0 * * * *'
-  workflow_dispatch:
+    - cron: "*/30 * * * *"   # كل 30 دقيقة
+  workflow_dispatch:          # تشغيل يدوي
 
 permissions:
-  contents: write
+  contents: write             # لازم لحفظ قاعدة البيانات في المستودع
+
+concurrency:
+  group: news-bot
+  cancel-in-progress: false   # لا يبدأ تشغيل جديد قبل انتهاء السابق
 
 jobs:
   run-bot:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -18,14 +24,13 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.12'
+          python-version: "3.12"
 
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: pip install feedparser requests
 
       - name: Run bot
         run: python -u bot.py
-        timeout-minutes: 15
         env:
           PYTHONUNBUFFERED: "1"
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
@@ -34,8 +39,17 @@ jobs:
           FRIEND_CHAT_ID: ${{ secrets.FRIEND_CHAT_ID }}
 
       - name: Save sent news
+        if: always()          # يحفظ حتى لو توقف البوت في منتصف التشغيل
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add sent_news.db
-          git diff --cached --quiet || (git commit -m "Update sent news" && git push)
+          if [ -f sent_news.db ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add sent_news.db
+            if ! git diff --cached --quiet; then
+              git commit -m "Update sent news database [skip ci]"
+              git pull --rebase origin "${GITHUB_REF_NAME}" || true
+              git push
+            else
+              echo "No changes to save."
+            fi
+          fi
