@@ -19,6 +19,7 @@ FEEDS = [
     "https://tunisie-telegraph.com/feed/",
     "https://feeds.bbci.co.uk/arabic/rss.xml",
     "https://www.france24.com/ar/rss",
+    "https://rss.app/feeds/jaBascGUQX6aVLXX.xml",
 ]
 
 # ==========================================
