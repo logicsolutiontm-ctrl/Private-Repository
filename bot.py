@@ -19,7 +19,6 @@ FEEDS = [
     "https://tunisie-telegraph.com/feed/",
     "https://feeds.bbci.co.uk/arabic/rss.xml",
     "https://www.france24.com/ar/rss",
-    # "https://rss.app/feeds/v1.1/YOUR_LINK_HERE", # روابط فايسبوك
 ]
 
 # ==========================================
@@ -63,7 +62,6 @@ def evaluate_and_summarize(title, summary):
     3. إذا كان مهماً ويخص تونس، اكتب ملخصاً سريعاً ومكثفاً في نقطتين أو ثلاث أسطر كحد أقصى بأسلوب احترافي ومباشر.
     """
     
-    # تم تحديث النموذج إلى gemini-pro لضمان عمله على جميع الحسابات
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key={GEMINI_API_KEY}"
     headers = {'Content-Type': 'application/json'}
     payload = {
@@ -80,7 +78,6 @@ def evaluate_and_summarize(title, summary):
                 return None
             return text
         else:
-            print(f"API Error: {data}")
             return None
     except Exception as e:
         print(f"Error calling AI API: {e}")
@@ -88,9 +85,6 @@ def evaluate_and_summarize(title, summary):
 
 # ==========================================
 # 5. الإرسال إلى تيليجرام
-# ==========================================
-# ==========================================
-# 5. الإرسال إلى تيليجرام (محدثة لكشف الأخطاء)
 # ==========================================
 def send_telegram(text, link):
     message = f"🚨 **خبر جديد** 🚨\n\n{text}\n\n🔗 رابط المصدر: {link}"
@@ -102,54 +96,9 @@ def send_telegram(text, link):
         "disable_web_page_preview": False
     }
     try:
-        response = requests.post(url, json=payload)
-        if response.status_code == 200:
-            print("-> تم إرسال الرسالة للتيليجرام بنجاح!")
-        else:
-            print(f"-> خطأ من تيليجرام: {response.json()}") # هذا السطر سيكشف لنا المشكلة
+        requests.post(url, json=payload)
     except Exception as e:
-        print(f"Error sending to Telegram: {e}")
-
-# ==========================================
-# 6. التشغيل الرئيسي (محدث للاختبار)
-# ==========================================
-def main():
-    # إرسال رسالة اختبار فورية قبل قراءة الأخبار
-    print("جاري إرسال رسالة اختبار لتيليجرام...")
-    send_telegram("هذه رسالة اختبار من البوت للتأكد من أن الربط يعمل بنجاح ✅", "https://github.com")
-
-    init_db()
-    print("بدأ البحث عن الأخبار في المصادر المحددة...")
-    
-    for feed_url in FEEDS:
-        if feed_url.strip().startswith("#"):
-            continue
-            
-        print(f"\nجاري فحص المصدر: {feed_url}")
-        feed = feedparser.parse(feed_url)
-        
-        for entry in feed.entries[:5]:  
-            entry_id = entry.get("id", entry.get("link"))
-            
-            if not is_already_sent(entry_id):
-                title = entry.get("title", "")
-                summary = entry.get("summary", "")
-                link = entry.get("link", "")
-
-                print(f"تحليل الخبر: {title}")
-                ai_summary = evaluate_and_summarize(title, summary)
-                
-                if ai_summary:
-                    send_telegram(ai_summary, link)
-                else:
-                    print("-> تم التجاهل (غير مهم أو لا يخص تونس).")
-                
-                mark_as_sent(entry_id)
-                
-    print("\nانتهت العملية بنجاح.")
-
-if __name__ == "__main__":
-    main()
+        pass
 
 # ==========================================
 # 6. التشغيل الرئيسي
@@ -167,22 +116,27 @@ def main():
         
         for entry in feed.entries[:5]:  
             entry_id = entry.get("id", entry.get("link"))
+            title = entry.get("title", "")
             
-            if not is_already_sent(entry_id):
-                title = entry.get("title", "")
-                summary = entry.get("summary", "")
-                link = entry.get("link", "")
+            # التحقق مما إذا كان الخبر قد أرسل من قبل
+            if is_already_sent(entry_id):
+                print(f"[-] تم تخطي (خبر قديم): {title}")
+                continue
 
-                print(f"تحليل الخبر: {title}")
-                ai_summary = evaluate_and_summarize(title, summary)
-                
-                if ai_summary:
-                    send_telegram(ai_summary, link)
-                    print("-> تم إرسال الخبر للتيليجرام!")
-                else:
-                    print("-> تم التجاهل (غير مهم أو لا يخص تونس).")
-                
-                mark_as_sent(entry_id)
+            print(f"[+] تحليل خبر جديد: {title}")
+            summary = entry.get("summary", "")
+            link = entry.get("link", "")
+
+            ai_summary = evaluate_and_summarize(title, summary)
+            
+            if ai_summary:
+                send_telegram(ai_summary, link)
+                print("   -> 🟢 تم إرسال الخبر للتيليجرام!")
+            else:
+                print("   -> 🔴 تم التجاهل من الذكاء الاصطناعي (لا يخص تونس).")
+            
+            # حفظ الخبر في الذاكرة لكي لا يتكرر
+            mark_as_sent(entry_id)
                 
     print("\nانتهت العملية بنجاح.")
 
