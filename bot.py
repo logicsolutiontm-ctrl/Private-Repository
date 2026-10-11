@@ -62,8 +62,8 @@ def evaluate_and_summarize(title, summary):
     - إذا كان الخبر يخص تونس أو الشأن التونسي الداخلي: اكتب ملخصاً إخبارياً واضحاً في سطرين. إياك أن تكتب كلمة تجاهل في الملخص.
     """
     
-    # التحديث الجديد للرابط (v1 والنموذج gemini-1.5-flash)
-    url = f"https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
+    # الحل النهائي: استخدام أحدث نسخة مدعومة للجميع (gemini-1.5-flash-latest) على مسار v1beta
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key={GEMINI_API_KEY}"
     headers = {'Content-Type': 'application/json'}
     payload = {
         "contents": [{"parts": [{"text": prompt}]}]
