@@ -10,14 +10,18 @@ import requests
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
-FRIEND_CHAT_ID = os.getenv("FRIEND_CHAT_ID") # تمت إضافة معرف الصديق هنا
+FRIEND_CHAT_ID = os.getenv("FRIEND_CHAT_ID")
 
+# نماذج 1.5 تم إيقافها (404). نستخدم نماذج 2.5 ويمكن تغييرها عبر GEMINI_MODEL
 MODELS = [
-    os.getenv("GEMINI_MODEL", "gemini-1.5-flash"), # تم تصحيح اسم النموذج الافتراضي
-    "gemini-1.5-flash-8b",
-    "gemini-1.5-flash-latest",
+    m for m in [
+        os.getenv("GEMINI_MODEL", "gemini-2.5-flash"),
+        "gemini-2.5-flash-lite",
+    ] if m
 ]
+MODELS = list(dict.fromkeys(MODELS))  # إزالة التكرار مع الحفاظ على الترتيب
 
+GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta"
 HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; NewsBot/1.0)"}
 DB_FILE = "sent_news.db"
 
@@ -57,6 +61,48 @@ def mark_as_sent(article_id):
 # ==========================================
 # 4. التقييم والتلخيص بالذكاء الاصطناعي
 # ==========================================
+DEAD_MODELS = set()      # نماذج أعطت 404، لا نعيد تجربتها
+_discovered = False      # هل تم جلب النماذج المتاحة تلقائياً؟
+
+def discover_models():
+    """يجلب النماذج المتاحة فعلياً لهذا المفتاح (تُستدعى فقط إذا فشلت كل النماذج بـ 404)."""
+    global _discovered
+    _discovered = True
+    try:
+        r = requests.get(
+            f"{GEMINI_BASE}/models",
+            headers={"x-goog-api-key": GEMINI_API_KEY},
+            params={"pageSize": 200},
+            timeout=20,
+        )
+        r.raise_for_status()
+        excluded = ("image", "tts", "live", "audio", "exp", "vision", "embedding", "robotics", "computer")
+        found = []
+        for m in r.json().get("models", []):
+            name = m.get("name", "").replace("models/", "")
+            if (
+                "generateContent" in m.get("supportedGenerationMethods", [])
+                and "flash" in name
+                and not any(x in name for x in excluded)
+                and name not in DEAD_MODELS
+            ):
+                found.append(name)
+        found.sort(reverse=True)  # الأحدث أولاً غالباً
+        for name in found[:4]:
+            if name not in MODELS:
+                MODELS.append(name)
+        print(f"      [نماذج مكتشفة تلقائياً]: {found[:4]}")
+    except Exception as e:
+        print(f"      [فشل اكتشاف النماذج]: {e}")
+
+def extract_text(data):
+    """استخراج النص من رد Gemini بأمان."""
+    try:
+        parts = data["candidates"][0]["content"]["parts"]
+        return "".join(p.get("text", "") for p in parts).strip()
+    except (KeyError, IndexError, TypeError):
+        return ""
+
 def evaluate_and_summarize(title, summary):
     prompt = f"""
     أنت محرر صحفي في وكالة أنباء تونسية.
@@ -70,49 +116,72 @@ def evaluate_and_summarize(title, summary):
     """
     payload = {"contents": [{"parts": [{"text": prompt}]}]}
 
-    for model in MODELS:
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
-        for attempt in range(3):
-            try:
-                response = requests.post(
-                    url,
-                    headers={"x-goog-api-key": GEMINI_API_KEY},
-                    json=payload,
-                    timeout=40,
-                )
-                if response.status_code == 429:
-                    print(f"      [429 - انتظار 20 ثانية] {model}")
-                    time.sleep(20)
-                    continue
-                if response.status_code == 404:
-                    print(f"      [النموذج غير متاح]: {model}")
-                    break  
-                response.raise_for_status()
+    tried_discovery = False
+    while True:
+        for model in list(MODELS):
+            if model in DEAD_MODELS:
+                continue
 
-                data = response.json()
-                text = data["candidates"][0]["content"]["parts"][0]["text"].strip()
-                print(f"      [رد الذكاء الاصطناعي]: {text[:60]}...")
+            url = f"{GEMINI_BASE}/models/{model}:generateContent"
+            for attempt in range(3):
+                try:
+                    response = requests.post(
+                        url,
+                        headers={"x-goog-api-key": GEMINI_API_KEY},
+                        json=payload,
+                        timeout=40,
+                    )
 
-                cleaned = text.replace(".", "").strip()
-                if cleaned.startswith("تجاهل") and len(cleaned) <= 10:
-                    return "skip", None
-                return "ok", text
+                    if response.status_code == 404:
+                        print(f"      [النموذج غير متاح]: {model}")
+                        DEAD_MODELS.add(model)
+                        break
 
-            except Exception as e:
-                print(f"      [خطأ Gemini {model}]: {e}")
-                break
+                    if response.status_code == 429:
+                        print(f"      [429 - انتظار 20 ثانية] {model}")
+                        time.sleep(20)
+                        continue
+
+                    if response.status_code in (500, 502, 503, 504):
+                        print(f"      [{response.status_code} - إعادة المحاولة] {model}")
+                        time.sleep(5 * (attempt + 1))
+                        continue
+
+                    response.raise_for_status()
+
+                    text = extract_text(response.json())
+                    if not text:
+                        print(f"      [رد فارغ أو محجوب] {model}")
+                        break
+
+                    print(f"      [رد الذكاء الاصطناعي]: {text[:60]}...")
+
+                    cleaned = text.replace(".", "").strip()
+                    if cleaned.startswith("تجاهل") and len(cleaned) <= 10:
+                        return "skip", None
+                    return "ok", text
+
+                except Exception as e:
+                    print(f"      [خطأ Gemini {model}]: {e}")
+                    break
+
+        # إذا كانت كل النماذج ميتة (404) نحاول اكتشاف نماذج متاحة مرة واحدة فقط
+        if all(m in DEAD_MODELS for m in MODELS) and not _discovered and not tried_discovery:
+            tried_discovery = True
+            discover_models()
+            continue
+        break
 
     return "error", None
 
 # ==========================================
-# 5. الإرسال إلى تيليجرام (محدث لإرسال لأكثر من شخص)
+# 5. الإرسال إلى تيليجرام (لأكثر من شخص)
 # ==========================================
 def send_telegram(text, link):
     message = f"🚨 خبر جديد 🚨\n\n{text}\n\n🔗 رابط المصدر: {link}"
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-    
-    # جمع المعرفات المتاحة (معرفك + معرف صديقك إن وجد)
-    chat_ids = [id.strip() for id in [TELEGRAM_CHAT_ID, FRIEND_CHAT_ID] if id]
+
+    chat_ids = [c.strip() for c in [TELEGRAM_CHAT_ID, FRIEND_CHAT_ID] if c and c.strip()]
     success = False
 
     for chat_id in chat_ids:
@@ -128,8 +197,8 @@ def send_telegram(text, link):
             else:
                 print(f"      [خطأ تيليجرام للمعرف {chat_id}]: {response.text}")
         except Exception as e:
-            print(f"Error sending to Telegram chat {chat_id}: {e}")
-            
+            print(f"      [خطأ إرسال تيليجرام للمعرف {chat_id}]: {e}")
+
     return success
 
 # ==========================================
@@ -168,7 +237,7 @@ def main():
                 link = entry.get("link", "")
 
                 status, ai_summary = evaluate_and_summarize(title, summary)
-                time.sleep(5) 
+                time.sleep(5)
 
                 if status == "ok":
                     if send_telegram(ai_summary, link):
