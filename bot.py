@@ -1,105 +1,184 @@
 import os
-import json
+import time
+import sqlite3
 import feedparser
 import requests
 
+# ==========================================
+# 1. إعداد المفاتيح
+# ==========================================
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
+MODELS = [
+    os.getenv("GEMINI_MODEL", "gemini-3.6-flash"),
+    "gemini-3.5-flash-lite",
+    "gemini-flash-latest",
+]
+
+HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; NewsBot/1.0)"}
+DB_FILE = "sent_news.db"
+
+# ==========================================
+# 2. مصادر الأخبار
+# ==========================================
 FEEDS = [
     "https://www.aljazeera.net/feed",
     "https://www.mosaiquefm.net/ar/rss",
     "https://tunisie-telegraph.com/feed/",
     "https://feeds.bbci.co.uk/arabic/rss.xml",
     "https://www.france24.com/ar/rss",
+    "https://rss.app/feeds/jaBascGUQX6aVLXX.xml",
 ]
 
-SEEN_FILE = "seen.json"
-MAX_PER_RUN = 10
-HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; NewsBot/1.0)"}
+# ==========================================
+# 3. إدارة قاعدة البيانات
+# ==========================================
+def init_db():
+    conn = sqlite3.connect(DB_FILE)
+    conn.execute("CREATE TABLE IF NOT EXISTS articles (id TEXT PRIMARY KEY)")
+    conn.commit()
+    conn.close()
 
+def is_already_sent(article_id):
+    conn = sqlite3.connect(DB_FILE)
+    row = conn.execute("SELECT id FROM articles WHERE id = ?", (article_id,)).fetchone()
+    conn.close()
+    return row is not None
 
-def load_seen():
-    try:
-        with open(SEEN_FILE, "r", encoding="utf-8") as f:
-            return set(json.load(f))
-    except (FileNotFoundError, json.JSONDecodeError):
-        return set()
+def mark_as_sent(article_id):
+    conn = sqlite3.connect(DB_FILE)
+    conn.execute("INSERT OR IGNORE INTO articles (id) VALUES (?)", (article_id,))
+    conn.commit()
+    conn.close()
 
+# ==========================================
+# 4. التقييم والتلخيص بالذكاء الاصطناعي
+# يرجع: ("ok", نص) أو ("skip", None) أو ("error", None)
+# ==========================================
+def evaluate_and_summarize(title, summary):
+    prompt = f"""
+    أنت محرر صحفي في وكالة أنباء تونسية.
+    الخبر:
+    العنوان: {title}
+    التفاصيل: {summary[:1500]}
 
-def save_seen(seen):
-    with open(SEEN_FILE, "w", encoding="utf-8") as f:
-        json.dump(sorted(seen)[-2000:], f, ensure_ascii=False)
+    المطلوب:
+    - إذا كان الخبر لا يتعلق بتونس إطلاقاً (أخبار دولية بحتة عن أمريكا، روسيا، السعودية، إيران، إلخ): أجب بكلمة واحدة فقط: تجاهل
+    - إذا كان الخبر يخص تونس أو الشأن التونسي الداخلي: اكتب ملخصاً إخبارياً واضحاً في سطرين. إياك أن تكتب كلمة تجاهل في الملخص.
+    """
+    payload = {"contents": [{"parts": [{"text": prompt}]}]}
 
+    for model in MODELS:
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+        for attempt in range(3):
+            try:
+                response = requests.post(
+                    url,
+                    headers={"x-goog-api-key": GEMINI_API_KEY},
+                    json=payload,
+                    timeout=40,
+                )
+                if response.status_code == 429:
+                    print(f"      [429 - انتظار 20 ثانية] {model}")
+                    time.sleep(20)
+                    continue
+                if response.status_code == 404:
+                    print(f"      [النموذج غير متاح]: {model}")
+                    break  # جرّب النموذج التالي
+                response.raise_for_status()
 
-def summarize(title, text):
-    if not GEMINI_API_KEY:
-        return ""
-    url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"
-    prompt = f"لخّص هذا الخبر في جملتين بالعربية:\n{title}\n{text[:1500]}"
-    try:
-        r = requests.post(
-            url,
-            headers={"x-goog-api-key": GEMINI_API_KEY},
-            json={"contents": [{"parts": [{"text": prompt}]}]},
-            timeout=30,
-        )
-        r.raise_for_status()
-        return r.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
-    except Exception as e:
-        print("Gemini error:", e)
-        return ""
+                data = response.json()
+                text = data["candidates"][0]["content"]["parts"][0]["text"].strip()
+                print(f"      [رد الذكاء الاصطناعي]: {text[:60]}...")
 
+                cleaned = text.replace(".", "").strip()
+                if cleaned.startswith("تجاهل") and len(cleaned) <= 10:
+                    return "skip", None
+                return "ok", text
 
-def send_telegram(message):
+            except Exception as e:
+                print(f"      [خطأ Gemini {model}]: {e}")
+                break
+
+    return "error", None
+
+# ==========================================
+# 5. الإرسال إلى تيليجرام
+# ==========================================
+def send_telegram(text, link):
+    message = f"🚨 خبر جديد 🚨\n\n{text}\n\n🔗 رابط المصدر: {link}"
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-    r = requests.post(
-        url,
-        json={"chat_id": TELEGRAM_CHAT_ID, "text": message[:4000]},
-        timeout=30,
-    )
-    if not r.ok:
-        print("Telegram error:", r.status_code, r.text)
-    return r.ok
+    payload = {
+        "chat_id": TELEGRAM_CHAT_ID,
+        "text": message[:4000],
+        "disable_web_page_preview": False,
+    }
+    try:
+        response = requests.post(url, json=payload, timeout=30)
+        if response.status_code != 200:
+            print(f"      [خطأ تيليجرام]: {response.text}")
+            return False
+        return True
+    except Exception as e:
+        print(f"Error sending to Telegram: {e}")
+        return False
 
-
+# ==========================================
+# 6. التشغيل الرئيسي
+# ==========================================
 def main():
-    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
-        raise SystemExit("Missing TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID")
+    if not (GEMINI_API_KEY and TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID):
+        raise SystemExit("مفتاح ناقص: تحقق من GitHub Secrets")
 
-    seen = load_seen()
-    first_run = len(seen) == 0
-    new_items = []
+    init_db()
+    print("بدأ البحث عن الأخبار في المصادر المحددة...")
 
     for feed_url in FEEDS:
+        if feed_url.strip().startswith("#"):
+            continue
+
+        print(f"\nجاري فحص المصدر: {feed_url}")
+
         try:
             resp = requests.get(feed_url, headers=HEADERS, timeout=20)
             resp.raise_for_status()
             feed = feedparser.parse(resp.content)
+
+            for entry in feed.entries[:5]:
+                entry_id = entry.get("id") or entry.get("link")
+                title = entry.get("title", "")
+                if not entry_id:
+                    continue
+
+                if is_already_sent(entry_id):
+                    print(f"[-] تم تخطي (خبر قديم): {title[:50]}...")
+                    continue
+
+                print(f"[+] تحليل خبر جديد: {title}")
+                summary = entry.get("summary", "")
+                link = entry.get("link", "")
+
+                status, ai_summary = evaluate_and_summarize(title, summary)
+                time.sleep(5)  # تجنب حدود الاستخدام المجاني
+
+                if status == "ok":
+                    if send_telegram(ai_summary, link):
+                        print("   -> 🟢 تم إرسال الخبر للتيليجرام!")
+                        mark_as_sent(entry_id)
+                    else:
+                        print("   -> ⚠️ فشل الإرسال، سيُعاد المحاولة لاحقاً.")
+                elif status == "skip":
+                    print("   -> 🔴 تم التجاهل من الذكاء الاصطناعي (لا يخص تونس).")
+                    mark_as_sent(entry_id)
+                else:
+                    print("   -> ⚠️ فشل الذكاء الاصطناعي، سيُعاد المحاولة لاحقاً.")
+
         except Exception as e:
-            print(f"Feed failed {feed_url}: {e}")
-            continue
+            print(f"حدث خطأ أثناء قراءة المصدر {feed_url}: {e}")
 
-        print(f"{feed_url}: {len(feed.entries)} entries")
-        for entry in feed.entries[:10]:
-            uid = entry.get("id") or entry.get("link")
-            if not uid or uid in seen:
-                continue
-            seen.add(uid)
-            new_items.append(entry)
-
-    # On the very first run, only send a few so you don't get flooded
-    limit = 3 if first_run else MAX_PER_RUN
-    for entry in new_items[:limit]:
-        title = entry.get("title", "")
-        summary = summarize(title, entry.get("summary", ""))
-        msg = f"📰 {title}\n\n{summary}\n\n{entry.get('link', '')}".strip()
-        send_telegram(msg)
-
-    save_seen(seen)
-    print(f"Done. New items: {len(new_items)}")
-
+    print("\nانتهت العملية بنجاح.")
 
 if __name__ == "__main__":
     main()
